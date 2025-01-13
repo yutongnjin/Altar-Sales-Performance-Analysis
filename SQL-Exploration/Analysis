@@ -1,0 +1,410 @@
+-- Sales revenue, AOV and order performance by year
+WITH performance AS (
+SELECT
+    YEAR(sales.order_date) AS time_year,
+    ROUND(SUM(products.unit_price_usd * sales.quantity), 0) AS revenue,
+    ROUND(SUM(products.unit_price_usd * sales.quantity) / COUNT(DISTINCT sales.order_number), 0) AS AOV,
+    COUNT(DISTINCT sales.order_number) AS orders_count
+FROM sales
+LEFT JOIN products ON products.product_key = sales.product_key
+WHERE YEAR(sales.order_date) < 2021
+GROUP BY YEAR(sales.order_date))
+
+SELECT
+    AVG(revenue),
+    AVG(AOV),
+    AVG(orders_count)
+FROM performance;
+
+-- Sales revenue, AOV and order growth rates by year
+WITH performance AS (
+SELECT
+    YEAR(sales.order_date) AS time_year,
+    ROUND(SUM(products.unit_price_usd * sales.quantity), 0) AS revenue,
+    ROUND(SUM(products.unit_price_usd * sales.quantity) / COUNT(DISTINCT sales.order_number), 0) AS AOV,
+    COUNT(DISTINCT sales.order_number) AS orders_count
+FROM sales
+LEFT JOIN products ON products.product_key = sales.product_key
+WHERE YEAR(sales.order_date) < 2021
+GROUP BY YEAR(sales.order_date))
+
+SELECT
+    time_year,
+    revenue,
+    AOV,
+    orders_count,
+    CONCAT(ROUND((revenue - LAG(revenue, 1) OVER (ORDER BY time_year)) / LAG(revenue, 1) OVER (ORDER BY time_year) * 100, 0), "%") AS revenue_growth,
+    CONCAT(ROUND((AOV - LAG(AOV, 1) OVER (ORDER BY time_year)) / LAG(AOV, 1) OVER (ORDER BY time_year) * 100, 0), "%") AS AOV_growth,
+    CONCAT(ROUND((orders_count - LAG(orders_count, 1) OVER (ORDER BY time_year)) / LAG(orders_count, 1) OVER (ORDER BY time_year) * 100, 0), "%") AS orders_growth
+FROM performance;
+
+-- Sales revenue, AOV and order growth rates by month
+WITH performance AS (
+SELECT
+    YEAR(sales.order_date) AS time_year,
+    MONTH(sales.order_date) AS time_month,
+    ROUND(SUM(products.unit_price_usd * sales.quantity), 0) AS revenue,
+    ROUND(SUM(products.unit_price_usd * sales.quantity) / COUNT(DISTINCT sales.order_number), 0) AS AOV,
+    COUNT(DISTINCT sales.order_number) AS orders_count
+FROM sales
+LEFT JOIN products ON products.product_key = sales.product_key
+WHERE YEAR(sales.order_date) < 2021
+GROUP BY YEAR(sales.order_date), MONTH(sales.order_date))
+
+SELECT
+    time_year,
+    time_month,
+    revenue,
+    AOV,
+    orders_count,
+    CONCAT(ROUND((revenue - LAG(revenue, 1) OVER (ORDER BY time_year, time_month)) / LAG(revenue, 1) OVER (ORDER BY time_year, time_month) * 100, 2), "%") AS revenue_growth,
+    CONCAT(ROUND((AOV - LAG(AOV, 1) OVER (ORDER BY time_year, time_month)) / LAG(AOV, 1) OVER (ORDER BY time_year, time_month) * 100, 2), "%") AS AOV_growth,
+    CONCAT(ROUND((orders_count - LAG(orders_count, 1) OVER (ORDER BY time_year, time_month)) / LAG(orders_count, 1) OVER (ORDER BY time_year, time_month) * 100, 2), "%") AS orders_growth
+FROM performance;
+
+-- Percentage of revenue by continent
+WITH continent_revenue AS (
+SELECT
+    YEAR(sales.order_date) AS time_year,
+    customers.continent AS continent,
+    ROUND(SUM(products.unit_price_usd * sales.quantity), 0) AS revenue
+FROM sales
+LEFT JOIN products ON products.product_key = sales.product_key
+LEFT JOIN customers ON customers.customer_key = sales.customer_key
+WHERE YEAR(sales.order_date) < 2021
+GROUP BY YEAR(sales.order_date), customers.continent),
+
+total_revenue_by_year AS (
+    SELECT
+        time_year,
+        SUM(revenue) AS total_revenue
+    FROM continent_revenue
+    GROUP BY time_year),
+
+continent_revenue_pct AS(
+SELECT
+    continent_revenue.time_year,
+    continent_revenue.continent,
+    continent_revenue.revenue,
+    CONCAT(ROUND(continent_revenue.revenue / total_revenue_by_year.total_revenue * 100, 2), "%") AS pct_revenue
+FROM continent_revenue
+JOIN total_revenue_by_year ON continent_revenue.time_year = total_revenue_by_year.time_year)
+
+SELECT
+    continent,
+    ROUND(AVG(pct_revenue), 2) AS avg_pct_revenue
+FROM continent_revenue_pct
+GROUP BY continent
+ORDER BY avg_pct_revenue DESC;
+
+-- Revenue growth rate by continent
+WITH continent_revenue AS (
+SELECT
+    YEAR(sales.order_date) AS time_year,
+    customers.continent AS continent,
+    ROUND(SUM(products.unit_price_usd * sales.quantity), 0) AS revenue
+FROM sales
+LEFT JOIN products ON products.product_key = sales.product_key
+LEFT JOIN customers ON customers.customer_key = sales.customer_key
+WHERE YEAR(sales.order_date) < 2021
+GROUP BY YEAR(sales.order_date), customers.continent)
+
+SELECT
+    time_year,
+    continent,
+    revenue,
+    CONCAT(ROUND((revenue - LAG(revenue, 3) OVER (ORDER BY time_year, continent)) / LAG(revenue, 3) OVER (ORDER BY time_year, continent) * 100, 0), "%") AS revenue_growth
+FROM continent_revenue;
+
+-- Average revenue, AOV and order by category
+WITH performance AS (
+SELECT
+    ROUND(SUM(products.unit_price_usd * sales.quantity), 0) AS total_revenue,
+    ROUND(SUM(products.unit_price_usd * sales.quantity) / COUNT(DISTINCT sales.order_number), 0) AS AOV,
+    COUNT(DISTINCT sales.order_number) AS orders_count
+FROM sales
+LEFT JOIN products ON products.product_key = sales.product_key
+WHERE YEAR(sales.order_date) < 2021),
+
+category_performance AS (
+SELECT
+    products.category,
+    ROUND(SUM(products.unit_price_usd * sales.quantity), 0) AS category_revenue,
+    ROUND(SUM(products.unit_price_usd * sales.quantity) / COUNT(DISTINCT sales.order_number), 0) AS category_AOV,
+    COUNT(DISTINCT sales.order_number) AS category_orders_count
+FROM sales
+LEFT JOIN products ON products.product_key = sales.product_key
+WHERE YEAR(sales.order_date) < 2021
+GROUP BY products.category)
+
+SELECT
+    category,
+    category_revenue AS revenue,
+    CONCAT(ROUND(category_revenue / total_revenue * 100, 1), "%") AS pct_revenue,
+    category_AOV AS AOV,
+    category_orders_count AS orders_count,
+    CONCAT(ROUND(category_orders_count / orders_count * 100, 1), "%") AS pct_orders_count
+FROM category_performance
+CROSS JOIN performance
+ORDER BY revenue DESC;
+
+-- Average revenue, AOV and order growth rate by category
+
+WITH category_performance AS (
+    SELECT
+        YEAR(sales.order_date) AS time_year,
+        products.category,
+        ROUND(SUM(products.unit_price_usd * sales.quantity), 0) AS revenue,
+        ROUND(SUM(products.unit_price_usd * sales.quantity) / COUNT(DISTINCT sales.order_number), 0) AS AOV,
+        COUNT(DISTINCT sales.order_number) AS orders_count
+    FROM sales
+    LEFT JOIN products ON products.product_key = sales.product_key
+    WHERE YEAR(sales.order_date) < 2021
+    GROUP BY time_year, products.category),
+
+category_growth_rate AS(
+SELECT
+	time_year,
+    category,
+    revenue,
+    AOV,
+    orders_count,
+    (revenue - LAG(revenue, 8) OVER (ORDER BY time_year, category)) / LAG(revenue, 8) OVER (ORDER BY time_year, category) AS revenue_growth,
+    (AOV - LAG(AOV, 8) OVER (ORDER BY time_year, category)) / LAG(AOV, 8) OVER (ORDER BY time_year, category) AS AOV_growth,
+    (orders_count - LAG(orders_count, 8) OVER (ORDER BY time_year, category)) / LAG(orders_count, 8) OVER (ORDER BY time_year, category) AS orders_growth
+FROM category_performance)
+
+SELECT
+	category,
+    CONCAT(ROUND(AVG(revenue_growth) * 100, 1), "%") AS average_revenue_growth,
+    CONCAT(ROUND(AVG(AOV_growth) * 100, 1), "%") AS average_AOV_growth,
+    CONCAT(ROUND(AVG(orders_growth) * 100, 1), "%") AS average_orders_growth
+FROM category_growth_rate
+GROUP BY category
+ORDER BY CONCAT(ROUND(AVG(revenue_growth) * 100, 1), "%") DESC;
+
+-- Average revenue, AOV and order by subcategory
+WITH performance AS (
+SELECT
+    ROUND(SUM(products.unit_price_usd * sales.quantity), 0) AS total_revenue,
+    ROUND(SUM(products.unit_price_usd * sales.quantity) / COUNT(DISTINCT sales.order_number), 0) AS AOV,
+    COUNT(DISTINCT sales.order_number) AS orders_count
+FROM sales
+LEFT JOIN products ON products.product_key = sales.product_key
+WHERE YEAR(sales.order_date) < 2021),
+
+subcategory_performance AS (
+SELECT
+    products.category,
+    products.subcategory,
+    ROUND(SUM(products.unit_price_usd * sales.quantity), 0) AS subcategory_revenue,
+    ROUND(SUM(products.unit_price_usd * sales.quantity) / COUNT(DISTINCT sales.order_number), 0) AS subcategory_AOV,
+    COUNT(DISTINCT sales.order_number) AS subcategory_orders_count
+FROM sales
+LEFT JOIN products ON products.product_key = sales.product_key
+WHERE YEAR(sales.order_date) < 2021
+GROUP BY products.category, products.subcategory)
+
+SELECT
+    category,
+    subcategory,
+    subcategory_revenue AS revenue,
+    CONCAT(ROUND(subcategory_revenue / total_revenue * 100, 1), "%") AS pct_revenue,
+    subcategory_AOV AS AOV,
+    subcategory_orders_count AS orders_count,
+    CONCAT(ROUND(subcategory_orders_count / orders_count * 100, 1), "%") AS pct_orders_count
+FROM subcategory_performance
+CROSS JOIN performance
+ORDER BY revenue DESC;
+
+-- Average revenue, AOV and order by product
+WITH performance AS (
+SELECT
+    ROUND(SUM(products.unit_price_usd * sales.quantity), 0) AS total_revenue,
+    COUNT(DISTINCT sales.order_number) AS orders_count
+FROM sales
+LEFT JOIN products ON products.product_key = sales.product_key
+WHERE YEAR(sales.order_date) < 2021),
+
+product_performance AS (
+SELECT
+    products.product_name,
+    products.category,
+    products.subcategory,
+    products.unit_price_usd,
+    ROUND(SUM(products.unit_price_usd * sales.quantity), 0) AS product_revenue,
+    ROUND(SUM(products.unit_price_usd * sales.quantity) / COUNT(DISTINCT sales.order_number), 0) AS product_AOV,
+    COUNT(DISTINCT sales.order_number) AS product_orders_count
+FROM sales
+LEFT JOIN products ON products.product_key = sales.product_key
+WHERE YEAR(sales.order_date) < 2021
+GROUP BY products.product_name, products.category, products.subcategory, products.unit_price_usd)
+
+SELECT
+    product_name,
+    category,
+    subcategory,
+    unit_price_usd,
+    product_revenue,
+    CONCAT(ROUND(product_revenue / total_revenue * 100, 3), "%") AS pct_revenue,
+    product_AOV,
+    product_orders_count,
+    CONCAT(ROUND(product_orders_count / orders_count * 100, 3), "%") AS pct_orders_count
+FROM product_performance
+CROSS JOIN performance
+ORDER BY product_revenue DESC;
+
+-- Percentage of revenue by sales channel
+
+SELECT
+    YEAR(order_date) AS time_year,
+    CONCAT(ROUND(SUM(CASE WHEN store_key = 0 THEN products.unit_price_usd * sales.quantity END) / SUM(products.unit_price_usd * sales.quantity) * 100, 0), "%") AS pct_online_revenue,
+    CONCAT(ROUND(SUM(CASE WHEN store_key != 0 THEN products.unit_price_usd * sales.quantity END) / SUM(products.unit_price_usd * sales.quantity) * 100, 0), "%") AS pct_in_store_revenue
+FROM sales
+LEFT JOIN products ON products.product_key = sales.product_key
+WHERE YEAR(order_date) < 2021
+GROUP BY time_year;
+
+
+-- Revenue growth rate by sales channel
+WITH performance AS (
+SELECT
+	YEAR(sales.order_date) AS time_year,
+	CASE 
+		WHEN store_key = 0 
+        THEN 'Online' 
+		ELSE 'In_Store' 
+	END AS sales_channel,
+	ROUND(SUM(products.unit_price_usd * sales.quantity), 0) AS total_revenue,
+	ROUND(SUM(products.unit_price_usd * sales.quantity) / COUNT(DISTINCT sales.order_number), 0) AS AOV,
+	COUNT(DISTINCT sales.order_number) AS orders_count
+FROM sales
+LEFT JOIN products ON products.product_key = sales.product_key
+WHERE YEAR(sales.order_date) < 2021
+GROUP BY time_year, sales_channel)
+
+SELECT
+	time_year,
+	sales_channel,
+	total_revenue,
+	AOV,
+	orders_count,
+	CONCAT(ROUND((total_revenue - LAG(total_revenue, 1) OVER (PARTITION BY sales_channel ORDER BY time_year)) 
+		/ LAG(total_revenue, 1) OVER (PARTITION BY sales_channel ORDER BY time_year) * 100, 0), "%") AS revenue_growth,
+	CONCAT(ROUND((AOV - LAG(AOV, 1) OVER (PARTITION BY sales_channel ORDER BY time_year)) 
+		/ LAG(AOV, 1) OVER (PARTITION BY sales_channel ORDER BY time_year) * 100, 0), "%") AS AOV_growth,
+	CONCAT(ROUND((orders_count - LAG(orders_count, 1) OVER (PARTITION BY sales_channel ORDER BY time_year)) 
+		/ LAG(orders_count, 1) OVER (PARTITION BY sales_channel ORDER BY time_year) * 100, 0), "%") AS orders_growth
+FROM performance;
+
+-- Top 5 subcategories by revenue and sales channel
+WITH channel_category_performance AS (
+SELECT
+    CASE 
+        WHEN store_key = 0 THEN 'Online' 
+        ELSE 'In_Store' 
+    END AS sales_channel,
+    category,
+    subcategory,
+    SUM(products.unit_price_usd * sales.quantity) AS revenue
+FROM sales
+LEFT JOIN products ON products.product_key = sales.product_key
+WHERE YEAR(order_date) < 2021
+GROUP BY sales_channel, category, subcategory
+ORDER BY revenue DESC),
+
+channel_performance AS (
+SELECT
+	CASE 
+        WHEN store_key = 0 THEN 'Online' 
+        ELSE 'In_Store' 
+	END AS sales_channel,
+    SUM(products.unit_price_usd * sales.quantity) AS revenue
+FROM sales
+LEFT JOIN products ON products.product_key = sales.product_key
+WHERE YEAR(order_date) < 2021
+GROUP BY sales_channel),
+
+pct_revenue AS(
+SELECT
+	channel_category_performance.sales_channel,
+    channel_category_performance.category,
+    channel_category_performance.subcategory,
+    ROUND(channel_category_performance.revenue, 0) AS revenue,
+    CONCAT(ROUND(channel_category_performance.revenue / channel_performance.revenue * 100, 1), "%") AS pct_channel_revenue
+FROM channel_category_performance
+LEFT JOIN channel_performance ON channel_performance.sales_channel = channel_category_performance.sales_channel),
+
+ranked_revenue AS(
+SELECT
+	sales_channel,
+    category,
+    subcategory,
+    revenue,
+    pct_channel_revenue,
+    ROW_NUMBER() OVER (PARTITION BY sales_channel ORDER BY revenue DESC) AS rank_channel
+FROM pct_revenue)
+
+SELECT
+	sales_channel,
+    category,
+    subcategory,
+    revenue,
+    pct_channel_revenue,
+    rank_channel
+FROM ranked_revenue
+WHERE rank_channel <= 5;
+
+-- Number of unique and repeat customers, and percentage of repeat customers by year
+WITH first_order AS (
+SELECT
+	customer_key,
+    MIN(order_date) AS first_order_date
+FROM sales
+GROUP BY customer_key),
+
+repeat_customers AS (
+SELECT
+	DISTINCT sales.order_number,
+    sales.customer_key,
+    sales.order_date,
+	CASE 
+		WHEN sales.order_date = first_order_date
+		THEN 0
+        WHEN sales.order_date > first_order_date
+        THEN 1
+	END AS repeat_customer
+FROM sales
+LEFT JOIN first_order ON first_order.customer_key = sales.customer_key)
+
+SELECT
+	YEAR(order_date) AS time_year,
+    COUNT(DISTINCT customer_key) AS unique_customers,
+    COUNT(DISTINCT CASE WHEN repeat_customer = 0 THEN customer_key END) AS new_customers,
+    COUNT(DISTINCT CASE WHEN repeat_customer = 1 THEN customer_key END) AS repeat_customers,
+    CONCAT(ROUND(COUNT(DISTINCT CASE WHEN repeat_customer = 1 THEN customer_key END) / COUNT(DISTINCT customer_key) * 100, 0), "%") AS pct_repeat_customers
+FROM repeat_customers
+WHERE YEAR(order_date) < 2021
+GROUP BY time_year;
+
+-- Customer characteristics: average age of customers and gender balance
+WITH customer_age_gender AS (
+SELECT
+	DISTINCT sales.order_number,
+    sales.customer_key,
+    sales.order_date,
+	YEAR(sales.order_date) - YEAR(customers.birthday) AS age,
+    customers.gender
+FROM sales
+LEFT JOIN customers ON customers.customer_key = sales.customer_key)
+
+SELECT
+	YEAR(order_date) AS time_year,
+    ROUND(AVG(age)) AS avg_age,
+    ROUND(AVG(CASE WHEN gender = "Male" THEN age END), 0) AS avg_age_male,
+    ROUND(AVG(CASE WHEN gender = "Female" THEN age END), 0) AS avg_age_female,
+    CONCAT(ROUND(COUNT(DISTINCT CASE WHEN gender = "Male" THEN customer_key END) / COUNT(DISTINCT customer_key) * 100, 0), "%") AS pct_male_customers,
+	CONCAT(ROUND(COUNT(DISTINCT CASE WHEN gender = "Female" THEN customer_key END) / COUNT(DISTINCT customer_key) * 100, 0), "%") AS pct_female_customers   
+FROM customer_age_gender
+WHERE YEAR(order_date) < 2021
+GROUP BY YEAR(order_date);
